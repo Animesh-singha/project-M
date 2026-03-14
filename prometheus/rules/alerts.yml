@@ -1,0 +1,53 @@
+groups:
+  - name: HostAlerts
+    rules:
+      - alert: HostHighCpuLoad
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host high CPU load (instance {{ $labels.instance }})"
+          description: "CPU load is > 90% for 5 minutes\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+          
+      - alert: HostOutOfDiskSpace
+        expr: (node_filesystem_avail_bytes * 100) / node_filesystem_size_bytes < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host out of disk space (instance {{ $labels.instance }})"
+          
+      - alert: HostEndpointDown
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Endpoint down (instance {{ $labels.instance }})"
+          
+      - alert: PostgresHighConnections
+        expr: sum(pg_stat_activity_count) > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL high connections (instance {{ $labels.instance }})"
+
+  - name: SelfMonitoring
+    rules:
+      - alert: PrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus is down or unreachable"
+
+      - alert: AlertmanagerDown
+        expr: up{job="alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alertmanager is down or unreachable"

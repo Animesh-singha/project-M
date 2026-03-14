@@ -1,0 +1,13 @@
+route:
+  receiver: 'ai-analyzer'
+  group_by: ['alertname', 'instance', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+
+receivers:
+  - name: 'ai-analyzer'
+    webhook_configs:
+      # Assuming Fastify webhook runs on host port 3001
+      - url: "http://host.docker.internal:3001/webhook"
+        send_resolved: true

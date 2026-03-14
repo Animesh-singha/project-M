@@ -1,0 +1,32 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import dotenv from 'dotenv';
+import { webhookRoutes } from './routes/webhook.route';
+
+dotenv.config();
+
+const server = Fastify({
+  logger: true
+});
+
+server.register(cors);
+
+// Register routes
+server.register(webhookRoutes, { prefix: '/v1' });
+
+server.get('/health', async (request, reply) => {
+  return { status: 'ok', timestamp: new Date().toISOString() };
+});
+
+const start = async () => {
+  try {
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+    await server.listen({ port, host: '0.0.0.0' });
+    server.log.info(`Server running on port ${port}`);
+  } catch (err) {
+    server.log.error(err);
+    process.exit(1);
+  }
+};
+
+start();
