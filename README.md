@@ -1,6 +1,12 @@
-# Nexus SOC: Autonomous Al Monitoring & Security Suite
+# Nexus Autonomous SOC Module
 
-Nexus SOC is a premium, AI-driven monitoring platform designed for real-time fleet visibility, incident analysis, and autonomous remediation. It integrates industry-standard telemetry (Prometheus, Loki, Blackbox Exporter) with Google Gemini AI to provide a high-end SOC (Security Operations Center) experience.
+[![Status](https://img.shields.io/badge/Status-Operational-emerald?style=for-the-badge)](http://localhost:3000)
+[![Mode](https://img.shields.io/badge/Sandbox-Active-indigo?style=for-the-badge)](http://localhost:3000)
+
+> **Quick Link**: [📖 Full Project Documentation](file:///c:/Users/s%20s%20laptop%20bazar/monitoring/DOCUMENTATION.md) - Tech Stack, Features, & Setup Explained.
+
+## 🚀 Overview
+Nexus is an autonomous monitoring platform that uses AI to detect and resolve infrastructure incidents. It integrates industry-standard telemetry (Prometheus, Loki, Blackbox Exporter) with Google Gemini AI to provide a high-end SOC (Security Operations Center) experience.
 
 ## ✨ Core Features
 

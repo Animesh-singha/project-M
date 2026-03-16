@@ -1,50 +1,221 @@
 'use client';
 
-import { AlertTriangle, Activity, ShieldAlert, CheckCircle, ServerCrash } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  AlertTriangle, Activity, ShieldAlert, CheckCircle, ServerCrash, Server, X, Maximize2, 
+  LayoutDashboard, Server as ServerIcon, Globe, ShieldAlert as AlertIcon, 
+  Terminal, Share2, ShieldCheck, Share as ShareIcon, Shield
+} from 'lucide-react';
+
 import ChatWidget from '@/components/ChatWidget';
 import LiveLogsViewer from '@/components/LiveLogsViewer';
 import UptimeMonitor from '@/components/UptimeMonitor';
-import { motion } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import ServerGrid from '@/components/ServerGrid';
+import SiteCard from '@/components/SiteCard';
+import FleetOverview from '@/components/FleetOverview';
+import ErrorStream from '@/components/ErrorStream';
+import InfrastructureTopology from '@/components/InfrastructureTopology';
+import MetricGraph from '@/components/MetricGraph';
+import CommandPalette from '@/components/CommandPalette';
+import AlertTimeline from '@/components/AlertTimeline';
+import RootCauseTimeline from '@/components/RootCauseTimeline';
 
 export default function DashboardPage() {
   const [incidents, setIncidents] = useState<any[]>([]);
   const [stats, setStats] = useState({ total: 0, critical: 0, last24h: 0 });
   const [loading, setLoading] = useState(true);
-  const [monitoredSites, setMonitoredSites] = useState<string[]>(['prod.main-site.com', 'api.gateway.so', 'db01.cluster.internal']);
+  const [monitoredSites, setMonitoredSites] = useState<any[]>([]);
+  const [servers, setServers] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<any>({ mttr: '0.0', frequency: [] });
+  const [selectedSite, setSelectedSite] = useState<any | null>(null);
+  const [selectedIncident, setSelectedIncident] = useState<any | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<any | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'infra' | 'sites' | 'map' | 'errors' | 'incidents'>('overview');
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [timelineEvents, setTimelineEvents] = useState<any[]>([]);
+  const [isTimelineLoading, setIsTimelineLoading] = useState(false);
+
+  const handleExplainAI = async () => {
+    if (!selectedIncident) return;
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch(`http://localhost:3001/v1/incidents/${selectedIncident.id}/analyze`);
+      if (res.ok) {
+        const data = await res.json();
+        setAiAnalysis(data);
+      }
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   useEffect(() => {
-    // In a real app we'd use SWR or React Query, but we keep it simple for now
+    if (!selectedIncident) setAiAnalysis(null);
+  }, [selectedIncident]);
+
+  useEffect(() => {
+    if (selectedIncident) {
+      const fetchTimeline = async () => {
+        setIsTimelineLoading(true);
+        try {
+          const res = await fetch(`http://localhost:3001/v1/incidents/${selectedIncident.id}/timeline`);
+          if (res.ok) {
+            const data = await res.json();
+            setTimelineEvents(data);
+          }
+        } finally {
+          setIsTimelineLoading(false);
+        }
+      };
+      fetchTimeline();
+    }
+  }, [selectedIncident]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
+  useEffect(() => {
     const loadData = async () => {
       try {
-        // Fetch via server actions (simulated by fetching the actual db functions if they were exported as APIs.
-        // For local demo purposes we'll use a mocked initial state if the DB fails)
         const dummyStats = { total: 0, critical: 0, last24h: 0 };
         setStats(dummyStats);
-        setIncidents([]);
+        
+        // Fetch incidents from AI Analyzer
+        const incRes = await fetch('http://localhost:3001/v1/incidents');
+        if (incRes.ok) {
+           const incData = await incRes.json();
+           setIncidents(incData);
+           setStats({
+             total: incData.length,
+             critical: incData.filter((i: any) => i.severity === 'CRITICAL' && i.status !== 'RESOLVED').length,
+             last24h: incData.filter((i: any) => new Date(i.timestamp).getTime() > Date.now() - 86400000).length
+           });
+        }
+
+        const statsRes = await fetch('http://localhost:3001/v1/incidents/stats');
+        if (statsRes.ok) {
+           const statsData = await statsRes.json();
+           setAnalytics(statsData);
+        }
+
+        const res = await fetch('/api/metrics');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.websites) setMonitoredSites(data.websites);
+          if (data.servers) setServers(data.servers);
+        }
       } finally {
         setLoading(false);
       }
     };
     loadData();
+    const interval = setInterval(loadData, 10000);
+    return () => clearInterval(interval);
   }, []);
 
-  const healthScore = Math.max(0, 100 - (Number(stats.critical) * 5) - (Number(stats.total) * 1));
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 }
-    }
+  const handleStatusUpdate = async (id: number, status: string) => {
+     try {
+        const res = await fetch(`http://localhost:3001/v1/incidents/${id}`, {
+           method: 'PATCH',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ status })
+        });
+        if (res.ok) {
+           // Refresh UI
+           const updated = await res.json();
+           setIncidents((prev: any[]) => prev.map((i: any) => i.id === id ? updated : i));
+        }
+     } catch (err) {
+        console.error('Failed to update incident status', err);
+     }
   };
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 300, damping: 24 } }
-  };
+  const healthScore = Math.max(0, 100 - (Number(stats.critical) * 10) - (incidents.filter((i: any) => i.status === 'OPEN').length * 2));
+
+  // Group sites by VPS
+  const sitesByVps = monitoredSites.reduce((acc: Record<string, any[]>, site: any) => {
+    const vps = site.vps || 'unknown';
+    if (!acc[vps]) acc[vps] = [];
+    acc[vps].push(site);
+    return acc;
+  }, {});
+
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'infra', label: 'Infrastructure', icon: ServerIcon },
+    { id: 'sites', label: 'Web Assets', icon: Globe },
+    { id: 'map', label: 'System Map', icon: Share2 },
+    { id: 'errors', label: 'Live Errors', icon: Terminal },
+    { id: 'incidents', label: 'Incidents', icon: AlertIcon },
+  ];
 
   return (
+    <>
+      {/* GLOBAL STATUS HEADER (SRE COMMAND CENTER UPGRADE) */}
+      <div className="bg-slate-950/80 border-b border-slate-800/50 backdrop-blur-xl sticky top-0 z-[60] py-3 px-8 shadow-2xl">
+        <div className="max-w-[1600px] mx-auto flex justify-between items-center sm:gap-6 gap-3">
+          <div className="flex items-center gap-6">
+             <div className="group flex flex-col cursor-help">
+                <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-indigo-400 transition-colors">Fleet Nodes</span>
+                <div className="flex items-center gap-2">
+                   <span className="text-lg font-black text-white">{servers.filter(s => s.status === 'online').length}</span>
+                   <span className="text-[10px] text-emerald-400 font-bold">READY</span>
+                </div>
+             </div>
+             <div className="w-px h-6 bg-slate-800 invisible sm:visible"></div>
+             <div className="group flex flex-col cursor-help">
+                <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-indigo-400 transition-colors">Active Assets</span>
+                <div className="flex items-center gap-2">
+                   <span className="text-lg font-black text-white">{monitoredSites.length}</span>
+                   <span className="text-[10px] text-indigo-400 font-bold">LIVE</span>
+                </div>
+             </div>
+             <div className="w-px h-6 bg-slate-800 invisible sm:visible"></div>
+             <div className="group flex flex-col cursor-help">
+                <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-rose-400 transition-colors">Open Incidents</span>
+                <div className="flex items-center gap-2">
+                   <span className="text-lg font-black text-rose-500">{incidents.filter(i => i.status === 'OPEN').length}</span>
+                   <span className="text-[10px] text-rose-400 font-bold animate-pulse">ATTN</span>
+                </div>
+             </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+             <div className="hidden lg:flex flex-col items-end mr-4">
+                <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Cyber Threat Assessment</span>
+                <div className="h-1.5 w-32 bg-slate-800 rounded-full overflow-hidden">
+                   <motion.div 
+                     animate={{ width: `${Math.min(100, (incidents.length * 15))}%` }}
+                     className={`h-full ${incidents.length > 3 ? 'bg-rose-500 shadow-[0_0_8px_#f43f5e]' : 'bg-emerald-500 shadow-[0_0_8px_#10b981]'}`}
+                   ></motion.div>
+                </div>
+             </div>
+             
+             <button className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-[9px] font-black text-slate-400 hover:text-white transition-all group">
+                <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-500 group-hover:text-white group-hover:border-indigo-500 transition-colors">Ctrl + K</kbd>
+                COMMAND CENTER
+             </button>
+
+             <select className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1 text-[10px] font-bold text-indigo-400 focus:ring-1 focus:ring-indigo-500 outline-none">
+                <option>Last 1 Hour</option>
+                <option>Last 5 Minutes</option>
+                <option>Last 24 Hours</option>
+                <option>Last 7 Days</option>
+             </select>
+          </div>
+        </div>
+      </div>
+
     <main className="min-h-screen glow-mesh text-slate-100 selection:bg-indigo-500/30">
       <div className="p-4 md:p-8 max-w-7xl mx-auto relative z-10">
       
@@ -52,7 +223,6 @@ export default function DashboardPage() {
       <motion.header 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: 'easeOut' }}
         className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-slate-700/50 pb-6 mb-8 gap-4"
       >
         <div>
@@ -65,164 +235,562 @@ export default function DashboardPage() {
             </h1>
           </div>
           <p className="text-slate-400 text-sm md:text-base ml-1">Autonomous monitoring platform with AI incident resolution.</p>
-          <UptimeMonitor onTargetsUpdate={setMonitoredSites} />
-        </div>
-        <div className="text-left md:text-right glass-panel px-6 py-3 rounded-2xl">
-          <div className="text-xs text-slate-400 uppercase tracking-widest font-semibold mb-1">Fleet Health</div>
-          <div className={`text-4xl font-black ${healthScore > 80 ? 'text-emerald-400' : healthScore > 50 ? 'text-amber-400' : 'text-rose-500'} drop-shadow-md flex items-baseline gap-1`}>
-            {healthScore}<span className="text-lg text-slate-500 font-medium">/100</span>
+          <div className="flex items-center gap-4 mt-2">
+             <UptimeMonitor onTargetsUpdate={() => {}} />
+             <div className="px-3 py-1 bg-indigo-500 text-[8px] font-black uppercase tracking-tighter rounded-full opacity-80">Sandbox Mode Active</div>
           </div>
+        </div>
+        
+        {/* Navigation Tabs */}
+        <div className="bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 flex gap-1 shadow-inner">
+           {tabs.map(tab => (
+             <button
+               key={tab.id}
+               onClick={() => setActiveTab(tab.id as any)}
+               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === tab.id ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+             >
+               <tab.icon size={14} />
+               <span className="hidden sm:inline">{tab.label}</span>
+             </button>
+           ))}
         </div>
       </motion.header>
 
-      {/* Stats Grid */}
+      {/* Main Content Area */}
+      <AnimatePresence mode="wait">
+        <motion.div
+           key={activeTab}
+           initial={{ opacity: 0, y: 10 }}
+           animate={{ opacity: 1, y: 0 }}
+           exit={{ opacity: 0, y: -10 }}
+           transition={{ duration: 0.2 }}
+        >
+          {/* 1. OVERVIEW SECTION */}
+          {activeTab === 'overview' && (
+            <section>
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-3 text-indigo-100 uppercase tracking-tight">
+                <LayoutDashboard className="text-indigo-500" /> Fleet Intelligence Overview
+              </h2>
+              <FleetOverview websites={monitoredSites} servers={servers} securityScore={healthScore} />
+              
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+                 <div className="space-y-6">
+                    <h3 className="text-lg font-bold flex items-center gap-2 mb-4"><Activity size={18} className="text-emerald-400"/> System Health Status</h3>
+                    <div className="glass-panel p-6 rounded-2xl">
+                       <div className="flex justify-between items-center mb-6">
+                         <span className="text-sm font-bold text-slate-300">Global Uptime Aggregate</span>
+                         <span className="text-emerald-400 font-black">99.98%</span>
+                       </div>
+                       <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-8">
+                         <div className="h-full w-[99.9%] bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
+                       </div>
+                       <div className="grid grid-cols-2 gap-4">
+                          <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800/50 text-center">
+                             <div className="text-2xl font-black text-rose-500">{stats.critical}</div>
+                             <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Active Alerts</div>
+                          </div>
+                          <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800/50 text-center">
+                             <div className="text-2xl font-black text-indigo-400">{monitoredSites.length}</div>
+                             <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Live Targets</div>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+                 
+                  <div>
+                     <AlertTimeline incidents={incidents} />
+                  </div>
+               </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <MetricGraph 
+                    label="Fleet Avg CPU" 
+                    data={[12, 15, 22, 18, 25, 30, 28, 35, 42, 38, 32, 28, 24, 20]} 
+                    color="indigo" 
+                    unit="%" 
+                  />
+                  <MetricGraph 
+                    label="Network Ingress" 
+                    data={[102, 115, 122, 118, 225, 330, 228, 235, 442, 338, 332, 228, 224, 220]} 
+                    color="emerald" 
+                    unit="mb/s" 
+                  />
+                  <div className="glass-panel p-6 rounded-2xl flex flex-col justify-center">
+                     <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Fleet Regional Distribution</div>
+                     <div className="space-y-4">
+                        {[
+                          { region: 'Europe (FRA)', count: 2, status: 'Active' },
+                          { region: 'US East (NYC)', count: 1, status: 'Active' },
+                          { region: 'Asia (SIN)', count: 0, status: 'Provisioning' }
+                        ].map(reg => (
+                          <div key={reg.region} className="flex justify-between items-center bg-slate-900/40 p-3 rounded-lg border border-slate-800/30">
+                             <span className="text-[10px] font-bold text-slate-300">{reg.region}</span>
+                             <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${reg.count > 0 ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-800 text-slate-500'}`}>
+                                {reg.count} NODES
+                             </span>
+                          </div>
+                        ))}
+                     </div>
+                  </div>
+               </div>
+            </section>
+          )}
+
+          {/* 2. INFRASTRUCTURE SECTION */}
+          {activeTab === 'infra' && (
+            <section>
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-3 text-indigo-100 uppercase tracking-tight">
+                <ServerIcon className="text-indigo-500" /> Infrastructure Nodes
+              </h2>
+              <ServerGrid />
+            </section>
+          )}
+
+          {/* 3. WEB ASSETS SECTION */}
+          {activeTab === 'sites' && (
+            <section className="space-y-12">
+              <h2 className="text-2xl font-bold mb-2 flex items-center gap-3 text-indigo-100 uppercase tracking-tight">
+                <Globe className="text-indigo-500" /> Global Web Assets
+              </h2>
+              <p className="text-slate-500 text-sm mb-8">Management grid for application clusters distributed across nodes.</p>
+              
+              {Object.keys(sitesByVps).map((vpsName, vIdx) => (
+                <div key={vpsName} className="space-y-6">
+                  <div className="flex items-center gap-4">
+                     <h2 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] bg-indigo-500/5 px-4 py-1.5 rounded-full border border-indigo-500/20 flex items-center gap-2">
+                       <ServerIcon size={10} /> {vpsName} FLEET
+                     </h2>
+                     <div className="h-px flex-1 bg-slate-800/50"></div>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {sitesByVps[vpsName].map((site: any) => (
+                      <SiteCard 
+                        key={site.target}
+                        target={site.target}
+                        vps={vpsName}
+                        onClick={() => setSelectedSite(site)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {/* 4. TOPOLOGY MAP SECTION */}
+          {activeTab === 'map' && (
+            <section>
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-3 text-indigo-100 uppercase tracking-tight">
+                <Share2 className="text-indigo-500" /> Infrastructure Dependency Web
+              </h2>
+              <InfrastructureTopology />
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+                 <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/50">
+                    <div className="text-[10px] text-indigo-400 font-bold mb-2 uppercase">Traffic Flow Analysis</div>
+                    <p className="text-xs text-slate-400">Current ingress distributed evenly across 3 primary load balancer nodes with 42ms overhead.</p>
+                 </div>
+                 <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/50">
+                    <div className="text-[10px] text-emerald-400 font-bold mb-2 uppercase">Core Redundancy</div>
+                    <p className="text-xs text-slate-400">Database cluster at 100% health. Replication lag at 2ms. Failover ready in secondary region.</p>
+                 </div>
+                 <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-800/50">
+                    <div className="text-[10px] text-rose-400 font-bold mb-2 uppercase">Security Perimeter</div>
+                    <p className="text-xs text-slate-400">Threat assessment at 0/100. No active bypass attempts detected in global firewall logs.</p>
+                 </div>
+              </div>
+            </section>
+          )}
+
+          {/* 5. LIVE ERRORS SECTION */}
+          {activeTab === 'errors' && (
+            <section>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold flex items-center gap-3 text-rose-100 uppercase tracking-tight">
+                  <Terminal className="text-rose-500" /> Critical Error Feed
+                </h2>
+                <div className="text-[10px] text-slate-500 font-mono">Consolidated Global Logs</div>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                 <div className="lg:col-span-2">
+                    <ErrorStream />
+                 </div>
+                 <div className="space-y-6">
+                    <div className="glass-panel p-6 rounded-2xl bg-rose-500/5 border-rose-500/20">
+                       <h3 className="text-sm font-bold text-rose-300 mb-4 flex items-center gap-2 underline underline-offset-4 decoration-rose-500/30">Immediate Actions</h3>
+                       <ul className="space-y-4">
+                          <li className="flex gap-3 text-xs leading-relaxed text-slate-300">
+                             <span className="w-1.5 h-1.5 bg-rose-500 rounded-full mt-1 shrink-0"></span>
+                             Check VPS resource saturation if high error rates persist.
+                          </li>
+                          <li className="flex gap-3 text-xs leading-relaxed text-slate-300">
+                             <span className="w-1.5 h-1.5 bg-rose-500 rounded-full mt-1 shrink-0"></span>
+                             Validate SSL/TLS certificates for targets showing "Handshake Failure".
+                          </li>
+                       </ul>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        // Logic to trigger AI analysis of current error stream
+                        alert('Triggering AI Global Analysis...');
+                      }}
+                      className="w-full py-4 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-black text-xs uppercase tracking-widest rounded-2xl border border-rose-500/30 transition-all flex items-center justify-center gap-3 group"
+                    >
+                       <Activity size={16} className="group-hover:animate-pulse"/> Run AI Diagnostic
+                    </button>
+                 </div>
+              </div>
+            </section>
+          )}
+
+          {/* 6. INCIDENT MANAGEMENT SECTION */}
+          {activeTab === 'incidents' && (
+            <section>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold flex items-center gap-3 text-indigo-100 uppercase tracking-tight">
+                  <AlertIcon className="text-indigo-500" /> Incident Command Center
+                </h2>
+                <div className="flex gap-4">
+                   <div className="text-[10px] text-slate-500 font-mono flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span> {incidents.filter(i => i.status === 'OPEN').length} OPEN
+                   </div>
+                   <div className="text-[10px] text-slate-500 font-mono flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span> {incidents.filter(i => i.status === 'INVESTIGATING').length} INVESTIGATING
+                   </div>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                 <div className="lg:col-span-3 space-y-6">
+                    {incidents.length === 0 ? (
+                      <div className="glass-panel p-20 text-center opacity-50 flex flex-col items-center">
+                         <CheckCircle size={48} className="text-emerald-500 mb-4" />
+                         <p className="text-xl font-bold uppercase tracking-widest">No Active Incidents</p>
+                      </div>
+                    ) : (
+                      <AnimatePresence mode="popLayout">
+                        {incidents.map((inc) => (
+                          <motion.div
+                            key={inc.id}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className={`glass-panel p-6 rounded-2xl border-l-4 transition-all ${
+                              inc.status === 'RESOLVED' ? 'opacity-60 grayscale-[0.5] border-l-emerald-500' :
+                              inc.severity === 'CRITICAL' ? 'border-l-rose-600 shadow-[0_0_20px_rgba(225,29,72,0.1)]' :
+                              inc.severity === 'HIGH' ? 'border-l-rose-500' :
+                              'border-l-indigo-500'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start mb-4">
+                               <div>
+                                  <div className="flex items-center gap-3 mb-1">
+                                     <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${
+                                       inc.severity === 'CRITICAL' ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' :
+                                       inc.severity === 'HIGH' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
+                                       'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
+                                     }`}>{inc.severity}</span>
+                                     <span className="text-xs font-mono text-slate-500">{new Date(inc.timestamp).toLocaleString()}</span>
+                                  </div>
+                                  <h3 className="text-lg font-bold text-white">{inc.alert_name}</h3>
+                                  <p className="text-xs text-indigo-400 font-bold uppercase tracking-widest mt-1">{inc.service}</p>
+                               </div>
+                               <div className="text-right">
+                                  <div className="text-[9px] text-slate-500 uppercase font-black mb-1">AI Confidence</div>
+                                  <div className="flex items-center gap-2">
+                                     <div className="w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                        <div className="h-full bg-emerald-500" style={{ width: `${inc.confidence}%` }}></div>
+                                     </div>
+                                     <span className="text-xs font-bold text-emerald-400">{inc.confidence}%</span>
+                                  </div>
+                               </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                               <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/50">
+                                  <div className="text-[10px] text-slate-500 uppercase font-bold mb-2">Root Cause Analysis</div>
+                                  <p className="text-sm text-slate-300 leading-relaxed italic">"{inc.root_cause}"</p>
+                               </div>
+                               <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/50">
+                                  <div className="text-[10px] text-slate-500 uppercase font-bold mb-2">Remediation Steps</div>
+                                  <p className="text-sm text-emerald-400/90 leading-relaxed">{inc.suggested_fix}</p>
+                               </div>
+                            </div>
+
+                            <div className="flex justify-between items-center pt-4 border-t border-slate-800/50">
+                               <div className="flex gap-3">
+                                  <button 
+                                    onClick={() => setSelectedIncident(inc)}
+                                    className="px-4 py-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 font-bold text-[10px] uppercase tracking-widest border border-indigo-500/30 rounded-xl transition-all"
+                                  >
+                                     Investigate Timeline
+                                  </button>
+                                  <button 
+                                    onClick={() => handleStatusUpdate(inc.id, 'RESOLVED')}
+                                    className="px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-bold text-[10px] uppercase tracking-widest border border-emerald-500/30 rounded-xl transition-all"
+                                  >
+                                     Resolve
+                                  </button>
+                               </div>
+                               <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter ${
+                                 inc.status === 'RESOLVED' ? 'bg-emerald-500/10 text-emerald-500' :
+                                 inc.status === 'INVESTIGATING' ? 'bg-amber-500/10 text-amber-500' :
+                                 'bg-rose-500/10 text-rose-500 animate-pulse'
+                               }`}>
+                                 Status: {inc.status}
+                               </div>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    )}
+                 </div>
+                 
+                 <div className="space-y-6">
+                    <div className="glass-panel p-6 rounded-2xl border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.05)]">
+                       <h3 className="text-sm font-bold text-indigo-300 mb-6 flex items-center gap-2">
+                          <Activity size={16} /> Incident KPIs
+                       </h3>
+                       <div className="space-y-6">
+                          <div>
+                             <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-2">
+                                <span>Mean Time to Resolve</span>
+                                <span className="text-white">{analytics.mttr}m</span>
+                             </div>
+                             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-indigo-500" style={{ width: `${Math.min(100, Number(analytics.mttr) * 5)}%` }}></div>
+                             </div>
+                          </div>
+                          <div>
+                             <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-2">
+                                <span>AI Accuracy (Confidence)</span>
+                                <span className="text-white">{incidents.length > 0 ? (incidents.reduce((acc: any, i: any) => acc + i.confidence, 0) / incidents.length).toFixed(1) : 0}%</span>
+                             </div>
+                             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-500" style={{ width: `${incidents.length > 0 ? (incidents.reduce((acc: any, i: any) => acc + i.confidence, 0) / incidents.length) : 0}%` }}></div>
+                             </div>
+                          </div>
+                          <div className="pt-4 grid grid-cols-2 gap-3">
+                             <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/50 text-center">
+                                <div className="text-xl font-black text-rose-500">{incidents.filter(i => i.status === 'OPEN').length}</div>
+                                <div className="text-[8px] text-slate-500 uppercase font-black tracking-tighter">Current Backlog</div>
+                             </div>
+                             <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/50 text-center">
+                                <div className="text-xl font-black text-emerald-500">{incidents.filter(i => i.status === 'RESOLVED').length}</div>
+                                <div className="text-[8px] text-slate-500 uppercase font-black tracking-tighter">Resolved (24h)</div>
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+                    
+                    <button className="w-full py-4 bg-indigo-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-lg shadow-indigo-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all">
+                       Export SLA Report (PDF)
+                    </button>
+                    
+                    <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800 text-[10px] text-slate-500 leading-relaxed font-mono">
+                       <div className="text-indigo-400 font-bold mb-1">PLATFORM INSIGHT</div>
+                       AI suggests that the last 3 critical incidents were related to VPS-NYC-02 resource exhaustion.
+                    </div>
+                 </div>
+              </div>
+            </section>
+           )}
+          )}
+         </motion.div>
+      </AnimatePresence>
+
+      {/* Shared Modals & Widgets */}
+      <AnimatePresence>
+        {selectedSite && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
+            <motion.div 
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               onClick={() => setSelectedSite(null)}
+               className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+            ></motion.div>
+            
+            <motion.div
+              layoutId={`logs-${selectedSite.target}`}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-5xl bg-[#0b0f19] border border-slate-700/50 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+            >
+              {/* Modal Header */}
+              <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+                    <Maximize2 size={18} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white leading-none mb-1">Live Terminal: {selectedSite.target.replace(/https?:\/\//, '')}</h2>
+                    <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">{selectedSite.vps} Infrastructure</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSelectedSite(null)}
+                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Log Viewer Container */}
+              <div className="flex-1 overflow-hidden p-6 bg-[#060910]">
+                <LiveLogsViewer 
+                  target={selectedSite.target}
+                  siteName={selectedSite.target.replace(/https?:\/\//, '')}
+                  className="h-full border-0 !bg-transparent"
+                />
+              </div>
+              
+              {/* Bottom Instructions */}
+              <div className="px-6 py-3 bg-slate-950/50 border-t border-slate-800 flex justify-between items-center">
+                 <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                    READ-TIME LOG STREAM ACTIVE
+                 </div>
+                 <div className="text-[10px] text-slate-400 flex gap-4">
+                    <span>Press ESC to exit</span>
+                    <span>Scroll to browse history</span>
+                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {selectedIncident && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
+            <motion.div 
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               onClick={() => setSelectedIncident(null)}
+               className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl"
+            ></motion.div>
+            
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-4xl bg-[#0b0f19] border border-slate-700/50 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+            >
+              {/* Modal Header */}
+              <div className="px-8 py-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`p-2.5 rounded-xl ${selectedIncident.severity === 'CRITICAL' ? 'bg-rose-500/10 text-rose-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                    <ShieldAlert size={22} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black text-white leading-none mb-1">{selectedIncident.alert_name}</h2>
+                    <p className="text-[10px] text-slate-500 font-mono uppercase tracking-[0.2em]">Incident ID: {selectedIncident.id} • {selectedIncident.service}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSelectedIncident(null)}
+                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="flex-1 overflow-y-auto px-8 py-8 grid grid-cols-1 lg:grid-cols-3 gap-10">
+                 {/* Timeline Section */}
+                 <div className="lg:col-span-2 space-y-8">
+                    <div>
+                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2">
+                          <Terminal size={14} className="text-indigo-500" /> Root Cause Storyboard
+                       </h3>
+                       <RootCauseTimeline events={timelineEvents} isLoading={isTimelineLoading} />
+                    </div>
+                 </div>
+
+                 {/* Actions & AI Section */}
+                 <div className="space-y-6">
+                    <div className="glass-panel p-6 rounded-2xl border border-indigo-500/20 bg-indigo-500/5">
+                       <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                          <Shield size={12} /> AI Incident Analyst
+                       </h4>
+                       
+                       {aiAnalysis ? (
+                         <motion.div 
+                           initial={{ opacity: 0, y: 5 }} 
+                           animate={{ opacity: 1, y: 0 }}
+                           className="space-y-4"
+                         >
+                            <div className="text-[10px] text-slate-300 leading-relaxed bg-slate-950/50 p-3 rounded-lg border border-slate-800">
+                               <span className="text-indigo-400 font-bold block mb-1">PROBABLE ROOT CAUSE</span>
+                               {aiAnalysis.rootCause}
+                            </div>
+                            <div className="text-[10px] text-slate-300 leading-relaxed bg-emerald-500/5 p-3 rounded-lg border border-emerald-500/20">
+                               <span className="text-emerald-400 font-bold block mb-1">SUGGESTED ACTION</span>
+                               {aiAnalysis.suggestedFix}
+                            </div>
+                         </motion.div>
+                       ) : (
+                         <>
+                           <p className="text-xs text-slate-300 leading-relaxed mb-6">
+                              Gemini can correlate metrics, logs, and traces to identify the root cause of this incident.
+                           </p>
+                           <button 
+                             onClick={handleExplainAI}
+                             disabled={isAnalyzing}
+                             className="w-full py-3 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white font-black text-[10px] uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+                           >
+                              {isAnalyzing ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <Shield size={14} />}
+                              {isAnalyzing ? 'Analyzing Failure...' : 'Explain with Gemini AI'}
+                           </button>
+                         </>
+                       )}
+                    </div>
+
+                    <div className="space-y-3">
+                       <button className="w-full py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all">
+                          Acknowledge Incident
+                       </button>
+                       <button className="w-full py-3 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all">
+                          Resolve Incident
+                       </button>
+                    </div>
+                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <motion.div 
-        variants={containerVariants}
-        initial="hidden"
-        animate="show"
-        className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.8 }}
+        className="mt-20 pt-8 border-t border-slate-800/50 flex flex-col md:flex-row justify-between items-center gap-6"
       >
-        <motion.div variants={itemVariants} whileHover={{ y: -5, scale: 1.02 }} className="glass-panel p-6 rounded-2xl flex items-center gap-5 transition-all cursor-default">
-          <div className="p-4 bg-indigo-500/10 rounded-2xl text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.2)]">
-            <Activity size={28} />
-          </div>
-          <div>
-            <div className="text-3xl font-black">{stats.total}</div>
-            <div className="text-sm font-medium text-slate-400">Total Alerts Processed</div>
-          </div>
-        </motion.div>
-        
-        <motion.div variants={itemVariants} whileHover={{ y: -5, scale: 1.02 }} className="glass-panel p-6 rounded-2xl flex items-center gap-5 relative overflow-hidden transition-all cursor-default">
-          <div className="absolute -top-10 -right-10 w-32 h-32 bg-rose-500/20 rounded-full blur-3xl mix-blend-screen pointer-events-none"></div>
-          <div className="p-4 bg-rose-500/10 rounded-2xl text-rose-400 border border-rose-500/20 shadow-[0_0_15px_rgba(244,63,94,0.2)]">
-            <AlertTriangle size={28} />
-          </div>
-          <div className="relative z-10">
-            <div className="text-3xl font-black text-rose-400">{stats.critical}</div>
-            <div className="text-sm font-medium text-slate-400">Critical Active Threats</div>
-          </div>
-        </motion.div>
-
-        <motion.div variants={itemVariants} whileHover={{ y: -5, scale: 1.02 }} className="glass-panel p-6 rounded-2xl flex items-center gap-5 transition-all cursor-default">
-          <div className="p-4 bg-emerald-500/10 rounded-2xl text-emerald-400 border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-            <CheckCircle size={28} />
-          </div>
-          <div>
-            <div className="text-3xl font-black text-emerald-400">{stats.last24h}</div>
-            <div className="text-sm font-medium text-slate-400">Anomalies (24 Hours)</div>
-          </div>
-        </motion.div>
-      </motion.div>
-
-      {/* Multi-Website Live Logs Grid */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.3, duration: 0.5 }}
-        className="mb-12"
-      >
-         <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 text-indigo-100">
-            Per-Website Telemetry Streams
-         </h2>
-         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {monitoredSites.map((site) => (
-              <LiveLogsViewer 
-                key={site}
-                target={site.includes('.') ? site : undefined}
-                siteName={site.replace(/https?:\/\//, '')}
-                className="shadow-xl"
-              />
-            ))}
+         <div className="text-slate-500 text-xs font-medium">© 2026 Nexus Monitoring Systems • Autonomous SOC Module</div>
+         <div className="flex gap-4">
+            <button className="text-[10px] font-bold text-slate-400 hover:text-indigo-400 uppercase tracking-[0.2em] transition-colors">Documentation</button>
+            <button className="text-[10px] font-bold text-slate-400 hover:text-indigo-400 uppercase tracking-[0.2em] transition-colors">API Access</button>
+            <button className="text-[10px] font-bold text-slate-400 hover:text-indigo-400 uppercase tracking-[0.2em] transition-colors">System Logs</button>
          </div>
       </motion.div>
 
-      {/* Incident Timeline */}
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4, duration: 0.6 }}
-      >
-        <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-          Autonomous Incident Log
-        </h2>
-        
-        <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-px before:bg-gradient-to-b before:from-indigo-500/50 before:via-slate-700 before:to-transparent">
-          
-          {loading ? (
-            <div className="flex justify-center py-20">
-               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
-            </div>
-          ) : incidents.length === 0 ? (
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="text-center py-16 px-6 glass-panel rounded-2xl mx-auto max-w-2xl relative z-10"
-            >
-              <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.15)]">
-                <CheckCircle size={40} className="text-emerald-400" />
-              </div>
-              <h3 className="text-xl font-bold text-white mb-2">Systems Operational</h3>
-              <p className="text-slate-400">No active incidents detected across the monitored fleet. The AI analyzer is standing by.</p>
-              
-              <div className="mt-8 pt-6 border-t border-slate-700/50">
-                <p className="text-xs text-slate-500 font-medium">WAITING FOR WEBHOOK PAYLOAD ON PORT 3001</p>
-                <div className="flex justify-center gap-1 mt-2">
-                  <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-ping"></span>
-                </div>
-              </div>
-            </motion.div>
-          ) : (
-            incidents.map((incident: any, idx: number) => (
-              <motion.div 
-                initial={{ opacity: 0, x: idx % 2 === 0 ? -50 : 50 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.5 + (idx * 0.1), type: 'spring' }}
-                key={incident.id} 
-                className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group z-10"
-              >
-                {/* Timeline Node */}
-                <div className={`flex items-center justify-center w-12 h-12 rounded-full border-4 border-[#0b0f19] shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 shadow-lg z-20 ${incident.severity === 'critical' ? 'bg-rose-500 shadow-rose-500/30' : 'bg-amber-500 shadow-amber-500/30'}`}>
-                  {incident.severity === 'critical' ? <ServerCrash size={20} className="text-white" /> : <AlertTriangle size={20} className="text-white" />}
-                </div>
-
-                {/* Card */}
-                <div className="w-[calc(100%-4rem)] md:w-[calc(50%-3rem)] glass-panel p-6 rounded-2xl hover:shadow-[0_0_30px_rgba(99,102,241,0.15)] transition-all cursor-default">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-xl text-white tracking-tight">{incident.alert_name}</h3>
-                    <span className="text-xs font-mono text-slate-400 bg-slate-900/80 px-2 py-1.5 rounded-lg border border-slate-700/50">
-                      {new Date(incident.timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
-                  
-                  <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold uppercase tracking-wider rounded-lg border border-indigo-500/20 mb-5">
-                    <Activity size={12} /> {incident.service}
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/50">
-                      <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1.5">AI Summary Analysis</div>
-                      <p className="text-sm text-slate-300 leading-relaxed">{incident.summary}</p>
-                    </div>
-                    
-                    <div className="bg-rose-950/20 p-4 rounded-xl border border-rose-900/30">
-                      <div className="text-[10px] text-rose-400/80 uppercase tracking-widest font-bold mb-1.5">Determined Root Cause</div>
-                      <p className="text-sm text-slate-200 leading-relaxed">{incident.root_cause}</p>
-                    </div>
-                    
-                    <div className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-900/30">
-                      <div className="text-[10px] text-emerald-400/80 uppercase tracking-widest font-bold mb-1.5">Recommended Remediation</div>
-                      <p className="text-sm text-slate-200 leading-relaxed">{incident.suggested_fix}</p>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            ))
-          )}
-        </div>
-      </motion.div>
-
       <ChatWidget activeIncident={incidents.length > 0 ? incidents[0] : undefined} />
+      
+      <CommandPalette 
+        isOpen={isCommandPaletteOpen} 
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onAction={(action, target) => {
+          if (action.startsWith('go-')) {
+            setActiveTab(action.split('-')[1] as any);
+          } else {
+            console.log(`Executing palette command: ${action} on ${target}`);
+          }
+        }}
+      />
       </div>
     </main>
+    </>
   );
 }

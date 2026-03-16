@@ -16,13 +16,15 @@ const initDb = async () => {
     CREATE TABLE IF NOT EXISTS incidents (
       id SERIAL PRIMARY KEY,
       timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       service VARCHAR(255),
-      severity VARCHAR(50),
+      severity VARCHAR(50), -- e.g. low, medium, high, critical
       alert_name VARCHAR(255),
       summary TEXT,
       root_cause TEXT,
       suggested_fix TEXT,
-      status VARCHAR(50) DEFAULT 'open',
+      confidence INTEGER, -- 0-100 percentage
+      status VARCHAR(50) DEFAULT 'OPEN', -- OPEN, INVESTIGATING, RESOLVED
       duration VARCHAR(50)
     );
   `;
@@ -38,17 +40,19 @@ initDb();
 
 export const saveIncident = async (incidentData: any) => {
   const query = `
-    INSERT INTO incidents (service, severity, alert_name, summary, root_cause, suggested_fix, timestamp)
-    VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    INSERT INTO incidents (service, severity, alert_name, summary, root_cause, suggested_fix, confidence, status, timestamp)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
     RETURNING *;
   `;
   const values = [
     incidentData.service,
-    incidentData.severity,
+    incidentData.severity || 'UNKNOWN',
     incidentData.alert_name,
     incidentData.summary,
     incidentData.root_cause,
-    incidentData.suggested_fix
+    incidentData.suggested_fix,
+    incidentData.confidence || 0,
+    incidentData.status || 'OPEN'
   ];
 
   try {

@@ -9,13 +9,17 @@ const AI_MODEL = process.env.AI_MODEL || 'gemini-2.5-flash';
 const ai = new GoogleGenAI({ apiKey: AI_PROVIDER_API_KEY });
 
 export const generateRootCause = async (alertData: any, context: { metricsContext: string, logsContext: string }) => {
-  const systemInstruction = `You are a Senior DevOps Engineer and Security Analyst. 
-  An alert has fired in our monitoring system. Your job is to analyze the alert data, along with the recent metrics and logs provided from the server.
-  Provide a JSON response with exactly three fields:
-  1. "summary": A 1-2 sentence executive summary of the incident.
-  2. "root_cause": What likely caused this to happen based on the evidence.
-  3. "suggested_fix": Actionable steps to resolve the issue.
-  Do not include markdown blocks or any other text outside the JSON object.`;
+  const systemInstruction = `You are a Senior Security Operations Center (SOC) Analyst and Platform Engineer. 
+  Your goal is to transform raw alerts, metrics, and logs into structured intelligence.
+  
+  Provide a JSON response with these exact fields:
+  1. "severity": (string) One of: "LOW", "MEDIUM", "HIGH", "CRITICAL".
+  2. "summary": (string) Executive summary of the situation.
+  3. "root_cause": (string) Technical explanation of the primary failure.
+  4. "suggested_fix": (string) Actionable remediation steps.
+  5. "confidence": (number) Integer from 0 to 100 based on evidence strength.
+  
+  Do not include markdown or text outside the JSON.`;
 
   const userPrompt = `
   Alert Details:

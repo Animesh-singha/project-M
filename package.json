@@ -1,0 +1,9 @@
+{
+  "name": "nexus-soc-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install-all": "npm install --prefix dashboard && npm install --prefix ai-analyzer",
+    "dev": "npx concurrently \"npm run dev --prefix dashboard\" \"npm run dev --prefix ai-analyzer\""
+  }
+}
