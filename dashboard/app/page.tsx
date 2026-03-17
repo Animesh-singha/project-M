@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   AlertTriangle, Activity, ShieldAlert, CheckCircle, ServerCrash, Server, X, Maximize2, 
   LayoutDashboard, Server as ServerIcon, Globe, ShieldAlert as AlertIcon, 
-  Terminal, Share2, ShieldCheck, Share as ShareIcon, Shield
+  Terminal, Share2, ShieldCheck, Share as ShareIcon, Shield, Eye, EyeOff
 } from 'lucide-react';
 
 import ChatWidget from '@/components/ChatWidget';
@@ -21,7 +21,187 @@ import CommandPalette from '@/components/CommandPalette';
 import AlertTimeline from '@/components/AlertTimeline';
 import RootCauseTimeline from '@/components/RootCauseTimeline';
 
+function InteractiveAuth({ onAuth }: { onAuth: () => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'checking' | 'error' | 'success'>('idle');
+  const [mounted, setMounted] = useState(false);
+  const [terminalLines, setTerminalLines] = useState<string[]>([
+    'NEXUS SOC SECURE GATEWAY v4.0.2',
+    'TARGET NODE: 100.97.103.94 [PROD-DB-PRIMARY]',
+    'INITIALIZING SYSTEM PROTOCOLS...',
+    'READY FOR MULTI-FACTOR AUTHENTICATION.'
+  ]);
+
+  useEffect(() => {
+    setMounted(true);
+    // Fetch recent auth history from server
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch('http://localhost:3001/v1/auth/history');
+        if (res.ok) {
+          const history = await res.json();
+          // Transform history into terminal lines
+          const historyLines = history.reverse().map((log: any) => 
+            `> RECENT ATTEMPT: ${log.username} [${log.ip_address}] - ${log.status}`
+          );
+          setTerminalLines(prev => [...prev.slice(0, 4), ...historyLines, ...prev.slice(4)]);
+        }
+      } catch (err) {
+        console.error('Failed to fetch auth history', err);
+      }
+    };
+    fetchHistory();
+  }, []);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (status === 'checking') return;
+    
+    setStatus('checking');
+    setTerminalLines(prev => [...prev.slice(-10), `> VERIFYING IDENTITY: ${username}...`]);
+    
+    // Check against user provided credentials
+    setTimeout(async () => {
+      const isValid = (
+        (username === 'singhaanimesh216@gmail.com' && password === 'YoForex@101') || 
+        (username === 'singhaanimesh@gmail.com' && password === 'YoForex@101') ||
+        (username === 'admin' && password === 'NexusSOC')
+      );
+
+      // Log the attempt to the server
+      try {
+        await fetch('http://localhost:3001/v1/auth/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, status: isValid ? 'SUCCESS' : 'FAILED' })
+        });
+      } catch (err) {
+        console.error('Failed to log auth attempt', err);
+      }
+
+      if (isValid) {
+        setTerminalLines(prev => [...prev, `> IDENTITY VERIFIED: ${username}`, '> ACCESS GRANTED.', '> DECRYPTING FLEET METRICS...']);
+        setStatus('success');
+        setTimeout(onAuth, 1000);
+      } else {
+        setTerminalLines(prev => [...prev, `> ATTEMPT BY: ${username}`, '> ACCESS DENIED: INCORRECT CREDENTIALS.']);
+        setStatus('error');
+        setTimeout(() => {
+          setStatus('idle');
+        }, 3000);
+      }
+    }, 1500);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[1000] bg-slate-950 flex items-center justify-center p-4 font-mono">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,#4f46e5_0%,transparent_50%)]"></div>
+        <div className="scan-line"></div>
+      </div>
+      
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="w-full max-w-md bg-slate-900/50 border border-indigo-500/30 rounded-3xl p-8 backdrop-blur-2xl shadow-[0_0_50px_rgba(79,70,229,0.1)] relative"
+      >
+        <div className="flex justify-center mb-8">
+          <div className="p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 text-indigo-400 relative">
+            <ShieldAlert size={40} className={status === 'checking' ? 'animate-pulse' : ''} />
+            {status === 'success' && (
+              <motion.div 
+                initial={{ scale: 0 }} 
+                animate={{ scale: 1 }} 
+                className="absolute -top-2 -right-2 bg-emerald-500 rounded-full p-1"
+              >
+                <CheckCircle size={16} className="text-white" />
+              </motion.div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-2 mb-8 bg-black/40 p-4 rounded-xl border border-slate-800 text-[10px] text-indigo-300 h-32 overflow-y-auto scrollbar-hide flex flex-col-reverse">
+          <div className="flex flex-col">
+            {terminalLines.map((line, i) => (
+              <div key={i} className="flex gap-2">
+                <span className="text-indigo-500/50">[{mounted ? new Date().toLocaleTimeString([], { hour12: false }) : '--:--:--'}]</span>
+                <span className={line.includes('DENIED') ? 'text-rose-400 font-bold' : line.includes('GRANTED') ? 'text-emerald-400 font-bold' : ''}>
+                  {line}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-[10px] text-slate-500 uppercase font-bold ml-1">Identity UID</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                if (status === 'error') setStatus('idle');
+              }}
+              placeholder="USER ID"
+              className="w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-3 text-sm text-white outline-none transition-all"
+              autoFocus
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] text-slate-500 uppercase font-bold ml-1">Security Token</label>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (status === 'error') setStatus('idle');
+                }}
+                placeholder="PASSWORD"
+                className={`w-full bg-slate-950/80 border ${status === 'error' ? 'border-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.2)]' : 'border-slate-800 focus:border-indigo-500'} rounded-xl px-4 py-3 text-sm text-white outline-none transition-all pr-12`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-indigo-400 transition-colors"
+                title={showPassword ? "Hide Password" : "Show Password"}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            {status === 'error' && (
+              <motion.p 
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-[10px] text-rose-500 font-bold ml-1 mt-1"
+              >
+                ERROR: INCORRECT PASS OR USERNAME
+              </motion.p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={status === 'checking' || !username || !password}
+            className="w-full mt-4 py-4 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white font-black text-xs uppercase tracking-[0.2em] rounded-xl transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
+          >
+            {status === 'checking' ? 'Processing...' : 'Authorize Access'}
+          </button>
+        </form>
+
+        <p className="mt-8 text-center text-[10px] text-slate-500 uppercase tracking-widest font-bold">
+          Protected by Nexus Neural Guard • Level 5 Clearance Required
+        </p>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [incidents, setIncidents] = useState<any[]>([]);
   const [stats, setStats] = useState({ total: 0, critical: 0, last24h: 0 });
   const [loading, setLoading] = useState(true);
@@ -159,33 +339,37 @@ export default function DashboardPage() {
     { id: 'incidents', label: 'Incidents', icon: AlertIcon },
   ];
 
+  if (!isAuthenticated && !loading) {
+     return <InteractiveAuth onAuth={() => setIsAuthenticated(true)} />;
+  }
+
   return (
     <>
       {/* GLOBAL STATUS HEADER (SRE COMMAND CENTER UPGRADE) */}
       <div className="bg-slate-950/80 border-b border-slate-800/50 backdrop-blur-xl sticky top-0 z-[60] py-3 px-8 shadow-2xl">
         <div className="max-w-[1600px] mx-auto flex justify-between items-center sm:gap-6 gap-3">
-          <div className="flex items-center gap-6">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-6">
              <div className="group flex flex-col cursor-help">
-                <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-indigo-400 transition-colors">Fleet Nodes</span>
+                <span className="text-[9px] sm:text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-indigo-400 transition-colors">Fleet Nodes</span>
                 <div className="flex items-center gap-2">
-                   <span className="text-lg font-black text-white">{servers.filter(s => s.status === 'online').length}</span>
-                   <span className="text-[10px] text-emerald-400 font-bold">READY</span>
+                   <span className="text-base sm:text-lg font-black text-white">{servers.filter(s => s.status === 'online').length}</span>
+                   <span className="text-[9px] sm:text-[10px] text-emerald-400 font-bold">READY</span>
                 </div>
              </div>
-             <div className="w-px h-6 bg-slate-800 invisible sm:visible"></div>
+             <div className="w-px h-6 bg-slate-800 hidden sm:block"></div>
              <div className="group flex flex-col cursor-help">
-                <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-indigo-400 transition-colors">Active Assets</span>
+                <span className="text-[9px] sm:text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-indigo-400 transition-colors">Active Assets</span>
                 <div className="flex items-center gap-2">
-                   <span className="text-lg font-black text-white">{monitoredSites.length}</span>
-                   <span className="text-[10px] text-indigo-400 font-bold">LIVE</span>
+                   <span className="text-base sm:text-lg font-black text-white">{monitoredSites.length}</span>
+                   <span className="text-[9px] sm:text-[10px] text-indigo-400 font-bold">LIVE</span>
                 </div>
              </div>
-             <div className="w-px h-6 bg-slate-800 invisible sm:visible"></div>
+             <div className="w-px h-6 bg-slate-800 hidden sm:block"></div>
              <div className="group flex flex-col cursor-help">
-                <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-rose-400 transition-colors">Open Incidents</span>
+                <span className="text-[9px] sm:text-[10px] text-slate-500 font-black uppercase tracking-widest group-hover:text-rose-400 transition-colors">Open Incidents</span>
                 <div className="flex items-center gap-2">
-                   <span className="text-lg font-black text-rose-500">{incidents.filter(i => i.status === 'OPEN').length}</span>
-                   <span className="text-[10px] text-rose-400 font-bold animate-pulse">ATTN</span>
+                   <span className="text-base sm:text-lg font-black text-rose-500">{incidents.filter(i => i.status === 'OPEN').length}</span>
+                   <span className="text-[9px] sm:text-[10px] text-rose-400 font-bold animate-pulse">ATTN</span>
                 </div>
              </div>
           </div>
@@ -231,7 +415,7 @@ export default function DashboardPage() {
               <ShieldAlert className="text-indigo-400" size={28} />
             </div>
             <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-              Nexus SOC Module
+               Nexus SOC Module
             </h1>
           </div>
           <p className="text-slate-400 text-sm md:text-base ml-1">Autonomous monitoring platform with AI incident resolution.</p>
@@ -242,12 +426,12 @@ export default function DashboardPage() {
         </div>
         
         {/* Navigation Tabs */}
-        <div className="bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 flex gap-1 shadow-inner">
+        <div className="bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 flex flex-wrap gap-1 shadow-inner w-full md:w-auto">
            {tabs.map(tab => (
              <button
                key={tab.id}
                onClick={() => setActiveTab(tab.id as any)}
-               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === tab.id ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+               className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-[10px] sm:text-xs font-bold transition-all flex-1 md:flex-initial ${activeTab === tab.id ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
              >
                <tab.icon size={14} />
                <span className="hidden sm:inline">{tab.label}</span>
@@ -284,7 +468,7 @@ export default function DashboardPage() {
                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-8">
                          <div className="h-full w-[99.9%] bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
                        </div>
-                       <div className="grid grid-cols-2 gap-4">
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800/50 text-center">
                              <div className="text-2xl font-black text-rose-500">{stats.critical}</div>
                              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Active Alerts</div>
@@ -594,8 +778,7 @@ export default function DashboardPage() {
                  </div>
               </div>
             </section>
-           )}
-          )}
+            )}
          </motion.div>
       </AnimatePresence>
 

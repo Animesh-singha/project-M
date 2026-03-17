@@ -3,11 +3,11 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const pool = new Pool({
-  host: process.env.DB_HOST || '127.0.0.1',
+  host: process.env.DB_HOST || '100.97.103.94',
   port: parseInt(process.env.DB_PORT || '5432'),
-  user: process.env.DB_USER || 'incident_user',
-  password: process.env.DB_PASSWORD || 'incident_pass',
-  database: process.env.DB_NAME || 'incidents',
+  user: process.env.DB_USER || 'nexus_user',
+  password: process.env.DB_PASSWORD || 'YoForex@101',
+  database: process.env.DB_NAME || 'nexus_db',
 });
 
 // Create tables if they don't exist
@@ -27,6 +27,15 @@ const initDb = async () => {
       status VARCHAR(50) DEFAULT 'OPEN', -- OPEN, INVESTIGATING, RESOLVED
       duration VARCHAR(50)
     );
+
+    CREATE TABLE IF NOT EXISTS auth_logs (
+      id SERIAL PRIMARY KEY,
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      username VARCHAR(255),
+      ip_address VARCHAR(50),
+      status VARCHAR(50), -- SUCCESS, FAILED
+      user_agent TEXT
+    );
   `;
   try {
     await pool.query(query);
@@ -37,6 +46,33 @@ const initDb = async () => {
 };
 
 initDb();
+
+export const saveAuthLog = async (log: { username: string, ip: string, status: string, userAgent?: string }) => {
+  const query = `
+    INSERT INTO auth_logs (username, ip_address, status, user_agent)
+    VALUES ($1, $2, $3, $4)
+    RETURNING *;
+  `;
+  const values = [log.username, log.ip, log.status, log.userAgent || ''];
+  try {
+    const res = await pool.query(query, values);
+    return res.rows[0];
+  } catch (err) {
+    console.error('Error saving auth log:', err);
+    throw err;
+  }
+};
+
+export const getAuthLogs = async (limit: number = 50) => {
+  const query = `SELECT * FROM auth_logs ORDER BY timestamp DESC LIMIT $1`;
+  try {
+    const res = await pool.query(query, [limit]);
+    return res.rows;
+  } catch (err) {
+    console.error('Error fetching auth logs:', err);
+    throw err;
+  }
+};
 
 export const saveIncident = async (incidentData: any) => {
   const query = `
